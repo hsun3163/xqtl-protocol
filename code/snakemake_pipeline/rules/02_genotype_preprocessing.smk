@@ -9,7 +9,7 @@
 #
 # SoS notebooks called:
 #   - pipeline/VCF_QC.ipynb (qc)
-#   - pipeline/genotype_formatting.ipynb (vcf_to_plink, merge_plink, plink_by_chrom)
+#   - pipeline/genotype_formatting.ipynb (vcf_to_plink, merge_plink, genotype_by_chrom)
 #   - pipeline/GWAS_QC.ipynb (qc_no_prune)
 # ============================================================
 
@@ -30,14 +30,15 @@ rule vcf_qc:
         outdir       = "{cwd}/data_preprocessing/genotype",
         fasta        = config["reference"]["fasta"],
         dbsnp        = config["reference"]["dbsnp"],
+        dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["genotype_qc"]["threads"]
     resources:
         mem_mb   = config["resources"]["genotype_qc"]["mem_mb"],
-        walltime = config["resources"]["genotype_qc"]["walltime"],
+        runtime = config["resources"]["genotype_qc"]["runtime"],
     shell:
         """
         mkdir -p {params.outdir}
-        sos run {params.pipeline_dir}/VCF_QC.ipynb qc \
+        sos run {params.pipeline_dir}/VCF_QC.ipynb qc {params.dry_run} \
             --cwd {params.outdir} \
             --genoFile {input.vcf} \
             --dbsnp-variants {params.dbsnp} \
@@ -67,17 +68,18 @@ rule vcf_to_plink:
         outdir       = "{cwd}/data_preprocessing/genotype",
         # Write VCF paths to a temporary list file consumed by the SoS notebook
         vcf_list     = "{cwd}/data_preprocessing/genotype/vcf_qc_files.list",
+        dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["genotype_qc"]["threads"]
     resources:
         mem_mb   = config["resources"]["genotype_qc"]["mem_mb"],
-        walltime = config["resources"]["genotype_qc"]["walltime"],
+        runtime = config["resources"]["genotype_qc"]["runtime"],
     shell:
         """
         mkdir -p {params.outdir}
         printf '%s\n' {input.vcf_qc} > {params.vcf_list}
         if [ $(wc -l < {params.vcf_list}) -gt 1 ]; then
             # Multiple VCFs: merge then convert
-            sos run {params.pipeline_dir}/genotype_formatting.ipynb merge_plink \
+            sos run {params.pipeline_dir}/genotype_formatting.ipynb merge_plink {params.dry_run} \
                 --cwd {params.outdir} \
                 --genoFile {params.vcf_list} \
                 --name xqtl_protocol_data.converted \
@@ -85,7 +87,7 @@ rule vcf_to_plink:
                 --numThreads {threads}
         else
             # Single VCF: convert directly
-            sos run {params.pipeline_dir}/genotype_formatting.ipynb vcf_to_plink \
+            sos run {params.pipeline_dir}/genotype_formatting.ipynb vcf_to_plink {params.dry_run} \
                 --cwd {params.outdir} \
                 --genoFile $(cat {params.vcf_list}) \
                 --name xqtl_protocol_data.converted \
@@ -119,13 +121,14 @@ rule plink_qc:
         geno_filter  = config["genotype_qc"]["geno_filter"],
         mind_filter  = config["genotype_qc"]["mind_filter"],
         hwe_filter   = config["genotype_qc"]["hwe_filter"],
+        dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["genotype_qc"]["threads"]
     resources:
         mem_mb   = config["resources"]["genotype_qc"]["mem_mb"],
-        walltime = config["resources"]["genotype_qc"]["walltime"],
+        runtime = config["resources"]["genotype_qc"]["runtime"],
     shell:
         """
-        sos run {params.pipeline_dir}/GWAS_QC.ipynb qc_no_prune \
+        sos run {params.pipeline_dir}/GWAS_QC.ipynb qc_no_prune {params.dry_run} \
             --cwd {params.outdir} \
             --genoFile {input.bed} \
             --name xqtl_protocol_data.plink_qc \
@@ -141,26 +144,29 @@ rule plink_qc:
 # ------------------------------------
 # Step 2.4 — Split plink genotype files by chromosome
 # ------------------------------------
-# Creates one plink set per chromosome and writes a file-list
-# consumed by TensorQTL.
-rule plink_by_chrom:
+# Creates one plink set per chromosome and writes a file-list consumed by
+# TensorQTL and the fine-mapping steps.
+# Actual SoS step name: genotype_by_chrom (not plink_by_chrom).
+# Output list file: {name}.genotype_by_chrom_files.txt (SoS naming convention).
+rule genotype_by_chrom:
     """Split plink genotype into per-chromosome files for parallel QTL analysis."""
     input:
         bed = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bed",
     output:
-        chrom_list = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.plink_files_list.txt",
+        chrom_list = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
         outdir       = "{cwd}/data_preprocessing/genotype",
         chroms       = " ".join(config["chromosomes"]),
+        dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["genotype_qc"]["threads"]
     resources:
         mem_mb   = config["resources"]["genotype_qc"]["mem_mb"],
-        walltime = config["resources"]["genotype_qc"]["walltime"],
+        runtime = config["resources"]["genotype_qc"]["runtime"],
     shell:
         """
-        sos run {params.pipeline_dir}/genotype_formatting.ipynb plink_by_chrom \
+        sos run {params.pipeline_dir}/genotype_formatting.ipynb genotype_by_chrom {params.dry_run} \
             --cwd {params.outdir} \
             --genoFile {input.bed} \
             --name xqtl_protocol_data.plink_qc \
