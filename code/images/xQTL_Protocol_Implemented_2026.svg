@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="8299" height="4939" viewBox="0 0 8299 4939">
+<defs><marker id="arrow" markerWidth="18" markerHeight="18" refX="15" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,10 L16,5 z" fill="#c2410c"/></marker></defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<image x="0" y="0" width="6439" height="4939" href="xQTL_Protocol_Feb_2024.png"/>
+<rect x="6529" y="520" width="1680" height="3899" rx="44" fill="#fff7ed" stroke="#ea580c" stroke-width="10" stroke-dasharray="42 28"/>
+<text x="7369.0" y="650.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="900" fill="#111827">Repository components to add</text>
+<text x="7369.0" y="743.6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="78" font-weight="900" fill="#111827">to the Lucidchart figure</text>
+<text x="7369.0" y="850.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">Base layer is the existing xQTL_Protocol_Feb_2024.png;</text>
+<text x="7369.0" y="902.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">boxes below are missing or newly explicit modules.</text>
+<rect x="6644" y="1080" width="1450" height="330" rx="28" fill="#ffedd5" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="1154.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">SuSiE-enloc enrichment</text>
+<text x="7369.0" y="1240.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">xQTL-GWAS enrichment priors before</text>
+<text x="7369.0" y="1292.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">pairwise colocalization</text>
+<rect x="6644" y="1500" width="1450" height="330" rx="28" fill="#e0f2fe" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="1574.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">cTWAS workflow</text>
+<text x="7369.0" y="1660.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">TWAS follow-up with variant selection</text>
+<text x="7369.0" y="1712.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">for candidate genes</text>
+<line x1="7369.0" y1="1408" x2="7369.0" y2="1492" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<rect x="6644" y="1920" width="1450" height="330" rx="28" fill="#ffedd5" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="1994.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">ColocBoost</text>
+<text x="7369.0" y="2080.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">Additional GWAS/xQTL colocalization</text>
+<text x="7369.0" y="2132.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">method notebook</text>
+<line x1="7369.0" y1="1828" x2="7369.0" y2="1912" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<rect x="6644" y="2340" width="1450" height="330" rx="28" fill="#e0f2fe" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="2414.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">EOO annotation</text>
+<text x="7369.0" y="2490.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">enrichment</text>
+<text x="7369.0" y="2586.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">Excess-of-overlap validation with</text>
+<text x="7369.0" y="2638.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">chromosome jackknife</text>
+<line x1="7369.0" y1="2248" x2="7369.0" y2="2332" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<rect x="6644" y="2760" width="1450" height="330" rx="28" fill="#ffedd5" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="2834.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">Pathway / GSEA</text>
+<text x="7369.0" y="2910.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">enrichment</text>
+<text x="7369.0" y="3006.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">Gene-set interpretation of prioritized</text>
+<text x="7369.0" y="3058.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">genes</text>
+<line x1="7369.0" y1="2668" x2="7369.0" y2="2752" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<rect x="6644" y="3180" width="1450" height="330" rx="28" fill="#e0f2fe" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="3254.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">GREGOR and sLDSC</text>
+<text x="7369.0" y="3340.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">Variant and partitioned-heritability</text>
+<text x="7369.0" y="3392.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">enrichment workflows</text>
+<line x1="7369.0" y1="3088" x2="7369.0" y2="3172" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<rect x="6644" y="3600" width="1450" height="330" rx="28" fill="#ffedd5" stroke="#344054" stroke-width="6"/>
+<text x="7369.0" y="3674.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="800" fill="#111827">xQTL modifier score</text>
+<text x="7369.0" y="3760.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">EMS training and prediction for</text>
+<text x="7369.0" y="3812.8" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="500" fill="#475467">variant-prioritization support</text>
+<line x1="7369.0" y1="3508" x2="7369.0" y2="3592" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<line x1="6179" y1="2500" x2="6529" y2="1200" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<line x1="6179" y1="3720" x2="6529" y2="2880" stroke="#c2410c" stroke-width="10" marker-end="url(#arrow)" stroke-dasharray="28 18"/>
+<text x="7369.0" y="4809.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="500" fill="#475467">Source audit: Protocol _2024_Mar.json; original figure preserved and extended.</text>
+</svg>
