@@ -1,14 +1,63 @@
+"""Generate a condensed implementation-view workflow SVG.
+
+This figure is a companion to the detailed Lucidchart protocol schematic in
+``Protocol _2024_Mar.json``. It intentionally groups several Lucidchart nodes
+into broader repository-implementation categories so the downstream workflow is
+easier to read in documentation and presentations.
+"""
+
 from pathlib import Path
 import html
+import json
+import re
 
 OUT = Path(__file__).with_name('xQTL_Protocol_Implemented_2026.svg')
+LUCIDCHART_SOURCE = Path(__file__).with_name('Protocol _2024_Mar.json')
 W, H = 1640, 1080
+
+EXPECTED_LUCIDCHART_LABELS = [
+    'Existing GWAS & xQTL Summary Statistics',
+    'Context Specfic xQTL',
+    'Genotype Quality Control',
+    'Omics-data Quantification',
+    'Genome-wide xQTL Association',
+    'Genome-wide xQTL Fine-mapping',
+    'Colocalization',
+    'TWAS',
+    'Causal TWAS',
+    'Mendelian Randomization',
+    'Multi-Context xQTL',
+    'Variant-level Prioritization',
+    "Alzheimer's Disease",
+]
 
 COLORS = {
     'bg': '#fbfbf7', 'panel': '#ffffff', 'stroke': '#344054', 'muted': '#667085',
     'input': '#dbeafe', 'process': '#dcfce7', 'integrate': '#fee2e2',
     'validate': '#fef3c7', 'output': '#e0e7ff', 'line': '#344054', 'dash': '#94a3b8'
 }
+
+
+def lucidchart_labels():
+    if not LUCIDCHART_SOURCE.exists():
+        raise FileNotFoundError(f'Missing Lucidchart source: {LUCIDCHART_SOURCE}')
+    data = json.loads(LUCIDCHART_SOURCE.read_text())
+    labels = set()
+    for page in data.get('pages', []):
+        for shape in page.get('items', {}).get('shapes', []):
+            text = ' '.join(area.get('text', '') for area in shape.get('textAreas', []))
+            text = re.sub(r'\s+', ' ', text).strip()
+            if text:
+                labels.add(text)
+    return labels
+
+
+def assert_lucidchart_source_coverage():
+    labels = lucidchart_labels()
+    missing = [label for label in EXPECTED_LUCIDCHART_LABELS if label not in labels]
+    if missing:
+        raise ValueError('Expected Lucidchart labels are missing: ' + ', '.join(missing))
+    print(f'Audited {len(labels)} Lucidchart labels from {LUCIDCHART_SOURCE.name}')
 
 
 def wrap(text, max_chars):
@@ -62,7 +111,7 @@ svg = [
     f'<rect width="100%" height="100%" fill="{COLORS["bg"]}"/>',
 ]
 svg.append(text_block(W / 2, 48, ['FunGen-xQTL Protocol Workflow: implemented 2026 repository view'], size=30, weight='900'))
-svg.append(text_block(W / 2, 80, ['Solid arrows show implemented data flow; dashed panels group analysis families.'], size=16, weight='500', fill=COLORS['muted']))
+svg.append(text_block(W / 2, 80, ['Condensed implementation view audited against Protocol _2024_Mar.json; not a replacement for the detailed schematic.'], size=16, weight='500', fill=COLORS['muted']))
 
 svg.append(panel(50, 115, 340, 425, 'Inputs & reference data'))
 svg.append(panel(430, 115, 340, 425, 'QC, harmonization & covariates'))
@@ -129,6 +178,8 @@ for key, label in items:
     svg.append(f'<text x="{x + 38}" y="{legend_y - 4}" font-size="15" font-weight="600" fill="#374151">{html.escape(label)}</text>')
     x += 300 if key != 'input' else 180
 
+svg.append(text_block(W / 2, 1045, [f'Source audit: {LUCIDCHART_SOURCE.name}; grouped for readability and implementation status.'], size=14, weight='500', fill=COLORS['muted']))
 svg.append('</svg>')
+assert_lucidchart_source_coverage()
 OUT.write_text('\n'.join(svg))
 print(OUT)
