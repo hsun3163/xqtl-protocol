@@ -2,7 +2,7 @@
 
 ## Relationship to the existing Lucidchart figure
 
-`xQTL_Protocol_Implemented_2026.svg` is now a wholesale visual extension of the existing protocol figure. The generator embeds the current Lucidchart-derived PNG, `xQTL_Protocol_Feb_2024.png`, as the untouched base layer and appends a right-side panel for components that should be added or made more explicit.
+`xQTL_Protocol_Implemented_2026.svg` is now a wholesale visual extension of the existing protocol figure. The generator embeds the current Lucidchart-derived PNG, `xQTL_Protocol_Feb_2024.png`, directly into the SVG as a base64 image layer and appends a right-side panel for components that should be added or made more explicit. This makes the SVG self-contained, so opening it outside the repository still shows the original figure plus the added panel.
 
 The Lucidchart JSON export, `Protocol _2024_Mar.json`, is still used as a source audit. The script checks for expected labels from the original schematic before writing the extended SVG, so the generated asset remains tied to the existing Lucidchart vocabulary.
 

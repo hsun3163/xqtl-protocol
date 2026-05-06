@@ -7,6 +7,7 @@ in the existing Lucidchart export (`Protocol _2024_Mar.json`).
 """
 
 from pathlib import Path
+import base64
 import html
 import json
 import re
@@ -50,6 +51,10 @@ COLORS = {
     'title': '#111827',
     'muted': '#475467',
 }
+
+
+def encoded_png(path):
+    return base64.b64encode(path.read_bytes()).decode('ascii')
 
 
 def png_dimensions(path):
@@ -131,14 +136,15 @@ def generate_svg():
     panel_y = 520
     panel_w = add_w
     panel_h = base_h - 1040
+    base_png = encoded_png(BASE_FIGURE)
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}">',
         '<defs><marker id="arrow" markerWidth="18" markerHeight="18" refX="15" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,10 L16,5 z" fill="#c2410c"/></marker></defs>',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        f'<image x="0" y="0" width="{base_w}" height="{base_h}" href="{BASE_FIGURE.name}"/>',
+        f'<image x="0" y="0" width="{base_w}" height="{base_h}" href="data:image/png;base64,{base_png}"/>',
         f'<rect x="{panel_x}" y="{panel_y}" width="{panel_w}" height="{panel_h}" rx="44" fill="{COLORS["panel"]}" stroke="{COLORS["panel_stroke"]}" stroke-width="10" stroke-dasharray="42 28"/>',
         text_block(panel_x + panel_w / 2, panel_y + 130, ['Repository components to add', 'to the Lucidchart figure'], size=78, weight='900'),
-        text_block(panel_x + panel_w / 2, panel_y + 330, ['Base layer is the existing xQTL_Protocol_Feb_2024.png;', 'boxes below are missing or newly explicit modules.'], size=44, weight='500', fill=COLORS['muted']),
+        text_block(panel_x + panel_w / 2, panel_y + 330, ['Base figure is embedded in this SVG;', 'boxes below are missing or newly explicit modules.'], size=44, weight='500', fill=COLORS['muted']),
     ]
 
     box_x = panel_x + 115
