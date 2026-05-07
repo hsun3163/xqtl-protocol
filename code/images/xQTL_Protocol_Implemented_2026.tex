@@ -1,0 +1,105 @@
+% Standalone TikZ implementation of the updated FunGen-xQTL workflow figure.
+%
+% Compile from the repository root or from code/images with:
+%   pdflatex code/images/xQTL_Protocol_Implemented_2026.tex
+%
+% The original Lucidchart-derived protocol figure is preserved as the base layer;
+% TikZ adds the right-hand panel for missing or newly explicit repository modules.
+\documentclass[tikz,border=3mm]{standalone}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,positioning}
+
+\graphicspath{{code/images/}{./}}
+
+\definecolor{panelFill}{HTML}{FFF7ED}
+\definecolor{panelStroke}{HTML}{EA580C}
+\definecolor{boxFillA}{HTML}{FFEDD5}
+\definecolor{boxFillB}{HTML}{E0F2FE}
+\definecolor{boxStroke}{HTML}{344054}
+\definecolor{textMain}{HTML}{111827}
+\definecolor{textMuted}{HTML}{475467}
+
+\begin{document}
+\begin{tikzpicture}[
+  font=\sffamily,
+  addonPanel/.style={
+    rounded corners=8pt,
+    draw=panelStroke,
+    line width=1.2pt,
+    dashed,
+    dash pattern=on 5pt off 3pt,
+    fill=panelFill
+  },
+  addonBoxA/.style={
+    rounded corners=5pt,
+    draw=boxStroke,
+    line width=0.8pt,
+    fill=boxFillA,
+    align=center,
+    text width=4.1cm,
+    minimum width=4.45cm,
+    minimum height=1.08cm,
+    inner sep=3pt
+  },
+  addonBoxB/.style={
+    addonBoxA,
+    fill=boxFillB
+  },
+  addonArrow/.style={
+    -{Stealth[length=2.2mm,width=1.8mm]},
+    draw=panelStroke,
+    line width=0.7pt,
+    dashed,
+    dash pattern=on 3pt off 2pt
+  }
+]
+
+% Preserve the existing Lucidchart-derived protocol figure as the base layer.
+\node[anchor=south west,inner sep=0pt] (base) at (0,0)
+  {\includegraphics[width=15.5cm]{xQTL_Protocol_Feb_2024.png}};
+
+% Right-side add-on panel implemented in TikZ.
+\coordinate (panelSW) at (15.75,1.15);
+\coordinate (panelNE) at (20.55,11.10);
+\draw[addonPanel] (panelSW) rectangle (panelNE);
+
+\node[align=center,text=textMain,font=\sffamily\bfseries\large] at (18.15,10.65)
+  {Repository components to add\\to the Lucidchart figure};
+\node[align=center,text=textMuted,font=\sffamily\scriptsize,text width=4.35cm] at (18.15,10.05)
+  {The Lucidchart-derived base figure is preserved; TikZ boxes mark missing or newly explicit modules.};
+
+\node[addonBoxA] (susieenloc) at (18.15,9.20)
+  {\textbf{SuSiE-enloc enrichment}\\[-1pt]
+   \scriptsize xQTL--GWAS enrichment priors before pairwise colocalization};
+\node[addonBoxB,below=0.22cm of susieenloc] (ctwas)
+  {\textbf{cTWAS workflow}\\[-1pt]
+   \scriptsize TWAS follow-up with variant selection for candidate genes};
+\node[addonBoxA,below=0.22cm of ctwas] (colocboost)
+  {\textbf{ColocBoost}\\[-1pt]
+   \scriptsize additional GWAS/xQTL colocalization method notebook};
+\node[addonBoxB,below=0.22cm of colocboost] (eoo)
+  {\textbf{EOO annotation enrichment}\\[-1pt]
+   \scriptsize excess-of-overlap validation with chromosome jackknife};
+\node[addonBoxA,below=0.22cm of eoo] (gsea)
+  {\textbf{Pathway / GSEA enrichment}\\[-1pt]
+   \scriptsize gene-set interpretation of prioritized genes};
+\node[addonBoxB,below=0.22cm of gsea] (gregor)
+  {\textbf{GREGOR and sLDSC}\\[-1pt]
+   \scriptsize variant and partitioned-heritability enrichment workflows};
+\node[addonBoxA,below=0.22cm of gregor] (ems)
+  {\textbf{xQTL modifier score}\\[-1pt]
+   \scriptsize EMS training and prediction for variant-prioritization support};
+
+\foreach \source/\target in {susieenloc/ctwas,ctwas/colocboost,colocboost/eoo,eoo/gsea,gsea/gregor,gregor/ems}
+  \draw[addonArrow] (\source.south) -- (\target.north);
+
+% Dashed callouts from the original integration and prioritization regions.
+\draw[addonArrow] (14.78,6.05) -- (susieenloc.west);
+\draw[addonArrow] (14.78,3.25) -- (gsea.west);
+
+\node[align=center,text=textMuted,font=\sffamily\scriptsize,text width=4.3cm] at (18.15,1.45)
+  {Source audit: \texttt{Protocol\_2024\_Mar.json}. Base visual: \texttt{xQTL\_Protocol\_Feb\_2024.png}.};
+
+\end{tikzpicture}
+\end{document}
