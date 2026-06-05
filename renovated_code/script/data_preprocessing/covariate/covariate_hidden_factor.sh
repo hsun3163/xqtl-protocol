@@ -59,7 +59,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 case "$STEP" in
-    Marchenko_PC|PEER)
+    Marchenko_PC_full|PEER|Marchenko_PC|PEER_fit|PEER_extract|compute_residual)
         if [[ -n "$CONTAINER" ]]; then
             singularity exec "$CONTAINER" "${_cmd[@]}"
         else

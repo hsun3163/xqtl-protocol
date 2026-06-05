@@ -26,15 +26,20 @@
 rule sample_match:
     """Identify genotype-phenotype sample overlap and write a keep-samples list."""
     input:
-        bed           = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bed",
+        bed           = lambda wc: get_plink_qc_bed(),
         phenotype_bed = lambda wc: get_phenotype_bed(wc),
     output:
-        sample_genotypes = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.sample_genotypes.txt",
-        sample_overlap   = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.sample_overlap.txt",
+        sample_genotypes = "{cwd}/data_preprocessing/{theme}/genotype_data/{pheno_base}.sample_genotypes.txt",
+        sample_overlap   = "{cwd}/data_preprocessing/{theme}/genotype_data/{pheno_base}.sample_overlap.txt",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
         outdir       = "{cwd}/data_preprocessing/{theme}/genotype_data",
+        sample_lookup_arg = lambda wc: (
+            f"--sample_participant_lookup {next(t.get('sample_participant_lookup', '') for t in config['themes'] if t['name'] == wc.theme)}"
+            if next(t.get("sample_participant_lookup", "") for t in config["themes"] if t["name"] == wc.theme)
+            else ""
+        ),
         dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["default"]["threads"]
     resources:
@@ -43,13 +48,24 @@ rule sample_match:
     shell:
         """
         mkdir -p {params.outdir}
+        local_pheno="{params.outdir}/{wildcards.pheno_base}.bed.gz"
+        ln -sfn {input.phenotype_bed} "$local_pheno"
+        local_genofam="$(printf '%s\n' '{input.bed}' | sed 's/\\.bed$/.fam/')"
         sos run {params.pipeline_dir}/GWAS_QC.ipynb genotype_phenotype_sample_overlap {params.dry_run} \
             --cwd {params.outdir} \
-            --genoFile {input.bed} \
-            --phenoFile {input.phenotype_bed} \
-            --name xqtl_protocol_data.plink_qc.{wildcards.theme} \
+            --genoFile "$local_genofam" \
+            --phenoFile "$local_pheno" \
+            {params.sample_lookup_arg} \
             --container {params.container} \
             --numThreads {threads}
+        actual_sample_genotypes="{params.outdir}/{wildcards.pheno_base}.bed.sample_genotypes.txt"
+        actual_sample_overlap="{params.outdir}/{wildcards.pheno_base}.bed.sample_overlap.txt"
+        if [ -f "$actual_sample_genotypes" ] && [ ! -e "{output.sample_genotypes}" ]; then
+            ln -sfn "$actual_sample_genotypes" "{output.sample_genotypes}"
+        fi
+        if [ -f "$actual_sample_overlap" ] && [ ! -e "{output.sample_overlap}" ]; then
+            ln -sfn "$actual_sample_overlap" "{output.sample_overlap}"
+        fi
         """
 
 # ------------------------------------
@@ -61,11 +77,11 @@ rule sample_match:
 rule king_kinship:
     """Run KING kinship analysis and split into related/unrelated sample sets."""
     input:
-        bed              = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bed",
-        sample_genotypes = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.sample_genotypes.txt",
+        bed              = lambda wc: get_plink_qc_bed(),
+        sample_genotypes = lambda wc: get_sample_genotypes_path(wc.theme),
     output:
-        unrelated_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.bed",
-        related_bed   = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.related.bed",
+        unrelated_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.bed",
+        related_bed   = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.related.bed",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
@@ -81,7 +97,7 @@ rule king_kinship:
             --cwd {params.outdir} \
             --genoFile {input.bed} \
             --keep-samples {input.sample_genotypes} \
-            --name xqtl_protocol_data.plink_qc.{wildcards.theme} \
+            --name {wildcards.theme} \
             --container {params.container} \
             --numThreads {threads}
         """
@@ -95,10 +111,10 @@ rule king_kinship:
 rule unrelated_qc:
     """Apply QC filters and LD pruning to the unrelated sample set."""
     input:
-        unrelated_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.bed",
+        unrelated_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.bed",
     output:
-        pruned_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.bed",
-        pruned_in  = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.in",
+        pruned_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.bed",
+        pruned_in  = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.in",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
@@ -114,15 +130,27 @@ rule unrelated_qc:
         runtime = config["resources"]["genotype_qc"]["runtime"],
     shell:
         """
-        sos run {params.pipeline_dir}/GWAS_QC.ipynb qc {params.dry_run} \
-            --cwd {params.outdir} \
-            --genoFile {input.unrelated_bed} \
-            --mac-filter {params.mac_filter} \
-            --window {params.ld_window} \
-            --shift {params.ld_shift} \
-            --r2 {params.ld_r2} \
-            --container {params.container} \
-            --numThreads {threads}
+        fam_file="$(printf '%s\n' '{input.unrelated_bed}' | sed 's/\\.bed$/.fam/')"
+        sample_count="$(wc -l < "$fam_file")"
+        if [ "$sample_count" -lt 50 ]; then
+            pruned_prefix="$(printf '%s\n' '{output.pruned_bed}' | sed 's/\\.bed$//')"
+            input_prefix="$(printf '%s\n' '{input.unrelated_bed}' | sed 's/\\.bed$//')"
+            mkdir -p {params.outdir}
+            ln -sfn '{input.unrelated_bed}' '{output.pruned_bed}'
+            ln -sfn "${{input_prefix}}.bim" "${{pruned_prefix}}.bim"
+            ln -sfn "${{input_prefix}}.fam" "${{pruned_prefix}}.fam"
+            awk '{{print $2}}' "${{input_prefix}}.bim" > '{output.pruned_in}'
+        else
+            sos run {params.pipeline_dir}/GWAS_QC.ipynb qc {params.dry_run} \
+                --cwd {params.outdir} \
+                --genoFile {input.unrelated_bed} \
+                --mac-filter {params.mac_filter} \
+                --window {params.ld_window} \
+                --shift {params.ld_shift} \
+                --r2 {params.ld_r2} \
+                --container {params.container} \
+                --numThreads {threads}
+        fi
         """
 
 # ------------------------------------
@@ -134,15 +162,14 @@ rule unrelated_qc:
 rule related_qc:
     """Filter related samples using the pruned variant list from unrelated QC."""
     input:
-        related_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.related.bed",
-        pruned_in   = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.in",
+        related_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.related.bed",
+        pruned_in   = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.in",
     output:
-        related_qc_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.related.plink_qc.extracted.bed",
+        related_qc_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.related.plink_qc.extracted.bed",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
         outdir       = "{cwd}/data_preprocessing/{theme}/genotype_data",
-        mac_filter   = config["genotype_qc"]["mac_filter"],
         dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["genotype_qc"]["threads"]
     resources:
@@ -154,7 +181,7 @@ rule related_qc:
             --cwd {params.outdir} \
             --genoFile {input.related_bed} \
             --keep-variants {input.pruned_in} \
-            --mac-filter {params.mac_filter} \
+            --mac-filter 0 \
             --container {params.container} \
             --numThreads {threads}
         """
@@ -167,9 +194,9 @@ rule related_qc:
 rule flashpca:
     """Compute genotype PCs using flashPCA on the unrelated, LD-pruned sample set."""
     input:
-        pruned_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.bed",
+        pruned_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.bed",
     output:
-        pca_rds = "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.pca.rds",
+        pca_rds = "{cwd}/data_preprocessing/{theme}/pca/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.pca.rds",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["flashpca"],
@@ -205,10 +232,10 @@ rule flashpca:
 rule project_samples:
     """Project related samples onto the PCA space of unrelated samples."""
     input:
-        related_qc_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/xqtl_protocol_data.plink_qc.{theme}.related.plink_qc.extracted.bed",
-        pca_rds        = "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.unrelated.plink_qc.prune.pca.rds",
+        related_qc_bed = "{cwd}/data_preprocessing/{theme}/genotype_data/" + PLINK_QC_BASENAME + ".{theme}.related.plink_qc.extracted.bed",
+        pca_rds        = "{cwd}/data_preprocessing/{theme}/pca/" + PLINK_QC_BASENAME + ".{theme}.unrelated.plink_qc.prune.pca.rds",
     output:
-        projected_rds = "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.pca.projected.rds",
+        projected_rds = "{cwd}/data_preprocessing/{theme}/pca/" + PLINK_QC_BASENAME + ".{theme}.related.plink_qc.extracted.pca.projected.rds",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["flashpca"],

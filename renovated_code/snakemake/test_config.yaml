@@ -9,6 +9,7 @@ start_from: "fastq"
 themes:
   - name: "AC"
     fastq_list: "/tmp/xqtl_test/AC_sample_fastq.list"
+    bam_list: "/tmp/xqtl_test/AC_bam_list.txt"
     data_dir: "/tmp/xqtl_test/fastq_AC"
     paired_end: true
     phenotype_bed: ""
@@ -52,6 +53,7 @@ genotype_qc:
   ld_window: 200
   ld_shift: 25
   ld_r2: 0.1
+  bad_ld: false
 
 pca:
   n_pcs: 20

@@ -8,6 +8,7 @@
 #   gEBMF       — Grouped EBMF
 #   missforest  — Random forest imputation
 #   knn         — K-nearest neighbors imputation
+#   missxgboost — XGBoost-based imputation
 #   soft        — Soft Impute
 #   mean        — Mean imputation
 #   lod         — Limit of Detection imputation
@@ -99,6 +100,16 @@ get_outpath <- function(opt, suffix) {
   file.path(opt$cwd, paste0(bname, suffix))
 }
 
+get_script_dir <- function() {
+  args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- "--file="
+  script_path <- sub(file_arg, "", args[grep(file_arg, args)])
+  if (length(script_path) == 0) {
+    return(getwd())
+  }
+  dirname(normalizePath(script_path[1]))
+}
+
 # ---------------------------------------------------------------------------
 # Steps
 # ---------------------------------------------------------------------------
@@ -158,6 +169,41 @@ run_knn <- function(opt) {
   res <- impute.knn(mat)
   out <- cbind(coord[rownames(mat), ], as.data.frame(res$data))
   write_bed(out, get_outpath(opt, ".knn.imputed.bed.gz"))
+}
+
+run_missxgboost <- function(opt) {
+  suppressPackageStartupMessages({
+    library(tibble)
+    library(readr)
+    library(dplyr)
+  })
+  source(file.path(get_script_dir(), "xgb_imp.R"))
+  xgboost_imputation <- load_xgboost_imputation()
+
+  dat <- read_bed(opt$phenoFile)
+  coord <- dat[, 1:4]
+  mat <- as.matrix(dat[, -(1:4)])
+
+  miss.ind <- which(rowSums(is.na(mat)) / ncol(mat) > opt$`qc-missing-rate`)
+  value0.ind <- which(rowSums((mat == 0 | is.na(mat))) / ncol(mat) > opt$`qc-zero-rate`)
+  miss.ind <- unique(c(miss.ind, value0.ind))
+
+  if (isTRUE(opt$`qc-prior-to-impute`)) {
+    if (length(miss.ind) > 0) {
+      coord_qc <- coord[-miss.ind, , drop = FALSE]
+      mat_qc <- mat[-miss.ind, , drop = FALSE]
+    } else {
+      coord_qc <- coord
+      mat_qc <- mat
+    }
+  } else {
+    coord_qc <- coord
+    mat_qc <- mat
+  }
+
+  pheno_imp <- xgboost_imputation(as.matrix(mat_qc))
+  out <- cbind(coord_qc, as.data.frame(pheno_imp))
+  write_bed(out, get_outpath(opt, ".imputed.bed.gz"))
 }
 
 run_soft <- function(opt) {
@@ -239,10 +285,11 @@ switch(opt$step,
   gEBMF        = run_gEBMF(opt),
   missforest   = run_missforest(opt),
   knn          = run_knn(opt),
+  missxgboost  = run_missxgboost(opt),
   soft         = run_soft(opt),
   mean         = run_mean(opt),
   lod          = run_lod(opt),
   bed_filter_na = run_bed_filter_na(opt),
-  stop(sprintf("Unknown step '%s'. Available: EBMF, gEBMF, missforest, knn, soft, mean, lod, bed_filter_na",
+  stop(sprintf("Unknown step '%s'. Available: EBMF, gEBMF, missforest, knn, missxgboost, soft, mean, lod, bed_filter_na",
                opt$step))
 )

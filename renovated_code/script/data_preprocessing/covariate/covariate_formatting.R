@@ -13,6 +13,7 @@ suppressPackageStartupMessages({
   library(optparse)
   library(dplyr)
   library(readr)
+  library(data.table)
 })
 
 opt_list <- list(
@@ -22,6 +23,8 @@ opt_list <- list(
               help = "RDS file from PCA.R project_samples (contains $pcs data frame)"),
   make_option("--covFile",      type = "character", default = NULL,
               help = "Fixed covariate file (gzip or plain TSV, samples as columns)"),
+  make_option("--name",         type = "character", default = NULL,
+              help = "Output basename without the trailing .gz"),
   make_option("--k",            type = "integer",   default = 20,
               help = "Number of genotype PCs to include"),
   make_option("--tol-cov",      type = "double",    default = 0.3,
@@ -40,6 +43,10 @@ if (is.null(opt$covFile)) stop("--covFile is required")
 
 dir.create(opt$cwd, showWarnings = FALSE, recursive = TRUE)
 
+strip_last_ext <- function(path) {
+  sub("\\.[^.]+$", "", basename(path))
+}
+
 # ── Step: merge_genotype_pc ──────────────────────────────────────────────────
 merge_genotype_pc <- function(opt) {
   # ── Dry-run: print full command and validate inputs ──────────────────────
@@ -50,6 +57,9 @@ merge_genotype_pc <- function(opt) {
     cat(sprintf("    --step %s \\\n",              opt$step))
     cat(sprintf("    --pcaFile %s \\\n",           opt$pcaFile))
     cat(sprintf("    --covFile %s \\\n",           opt$covFile))
+    if (!is.null(opt$name) && nzchar(opt$name)) {
+      cat(sprintf("    --name %s \\\n",            opt$name))
+    }
     cat(sprintf("    --k %d \\\n",                 opt$k))
     cat(sprintf("    --tol-cov %.2f \\\n",         opt$`tol-cov`))
     cat(sprintf("    --cwd %s\n",                    opt$cwd))
@@ -62,73 +72,92 @@ merge_genotype_pc <- function(opt) {
     quit(status = 0)
   }
 
-  cat("=== merge_genotype_pc ===\n")
+  compute_missing <- function(mtx) {
+    sum(is.na(mtx)) / length(mtx)
+  }
 
-  # Load PCA output
+  mean_impute_mtx <- function(mtx) {
+    f <- apply(mtx, 2, function(x) mean(x, na.rm = TRUE))
+    for (i in seq_along(f)) {
+      mtx[, i][which(is.na(mtx[, i]))] <- f[i]
+    }
+    mtx
+  }
+
+  filter_mtx <- function(X, missing_rate_thresh) {
+    rm_col <- which(apply(X, 2, compute_missing) > missing_rate_thresh)
+    if (length(rm_col)) {
+      X <- X[, -rm_col, drop = FALSE]
+    }
+    if (isTRUE(opt$`mean-impute`)) {
+      return(mean_impute_mtx(X))
+    }
+    X
+  }
+
   pca_obj <- readRDS(opt$pcaFile)
-  pcs <- if (is.list(pca_obj) && "pcs" %in% names(pca_obj)) pca_obj$pcs else pca_obj
-  k   <- min(opt$k, sum(grepl("^PC", colnames(pcs))))
-  cat(sprintf("Using %d genotype PCs from: %s\n", k, opt$pcaFile))
-
-  # Keep only top-k PCs, pivot to covariate matrix format:
-  #   rows = covariates, cols = samples
-  pc_cols <- paste0("PC", seq_len(k))
-  id_col  <- if ("sample_id" %in% colnames(pcs)) "sample_id" else colnames(pcs)[1]
-  pcs_sub <- pcs[, c(id_col, pc_cols), drop = FALSE]
-
-  # Transpose: covariates × samples
-  pc_t            <- t(as.matrix(pcs_sub[, pc_cols]))
-  colnames(pc_t)  <- pcs_sub[[id_col]]
-  rownames(pc_t)  <- pc_cols
-  pc_df           <- as.data.frame(pc_t)
-  pc_df           <- cbind(ID = rownames(pc_df), pc_df)
-
-  # Load fixed covariates
-  cov_df <- if (grepl("\\.gz$", opt$covFile)) {
-    read_tsv(opt$covFile, col_types = cols(.default = "c"), show_col_types = FALSE)
+  pca_output <- if (is.list(pca_obj) && "pc_scores" %in% names(pca_obj)) {
+    pca_obj$pc_scores
+  } else if (is.list(pca_obj) && "pcs" %in% names(pca_obj)) {
+    pca_obj$pcs
   } else {
-    read_tsv(opt$covFile, col_types = cols(.default = "c"), show_col_types = FALSE)
-  }
-  cat(sprintf("Fixed covariates: %d rows × %d cols\n", nrow(cov_df), ncol(cov_df)))
-
-  # Align samples: intersect of PC samples and covariate samples
-  # Assume first column of covFile is the covariate/row ID
-  id_col_cov <- colnames(cov_df)[1]
-  sample_cols_cov <- setdiff(colnames(cov_df), id_col_cov)
-  sample_cols_pc  <- setdiff(colnames(pc_df), "ID")
-  shared_samples  <- intersect(sample_cols_cov, sample_cols_pc)
-  cat(sprintf("Shared samples: %d\n", length(shared_samples)))
-
-  # Filter samples with too many missing covariates
-  cov_mat <- cov_df[, shared_samples, drop = FALSE]
-  miss_rate <- colMeans(is.na(cov_mat))
-  keep_samples <- names(miss_rate[miss_rate <= opt$`tol-cov`])
-  n_removed <- length(shared_samples) - length(keep_samples)
-  if (n_removed > 0)
-    cat(sprintf("Removing %d samples exceeding missing covariate tolerance (%.0f%%)\n",
-                n_removed, opt$`tol-cov` * 100))
-
-  # Mean imputation
-  cov_sub <- cov_df[, c(id_col_cov, keep_samples), drop = FALSE]
-  if (isTRUE(opt$`mean-impute`)) {
-    cov_sub[, -1] <- lapply(cov_sub[, -1], function(x) {
-      x <- as.numeric(x)
-      x[is.na(x)] <- mean(x, na.rm = TRUE)
-      x
-    })
+    pca_obj
   }
 
-  # Merge PCs on top of fixed covariates
-  pc_sub  <- pc_df[, c("ID", keep_samples), drop = FALSE]
-  colnames(pc_sub)[1]  <- id_col_cov
-  merged  <- bind_rows(cov_sub, pc_sub)
+  pc_cols <- grep("^PC", colnames(pca_output), value = TRUE)
+  k <- min(opt$k, length(pc_cols))
+  mtx <- pca_output %>% select(all_of(pc_cols[seq_len(k)])) %>% t()
+  colnames(mtx) <- if ("IID" %in% colnames(pca_output)) pca_output$IID else pca_output[[1]]
+  mtx <- mtx[seq_len(k), , drop = FALSE]
+  mtx <- mtx %>% as_tibble(rownames = "#id")
+  pca_samples <- colnames(mtx)
 
-  # Output filename derived from pcaFile basename
-  bname    <- sub("\\.pca\\.projected\\.rds$", "", basename(opt$pcaFile))
-  out_file <- file.path(opt$cwd, paste0(bname, ".pca.gz"))
-  write_tsv(merged, out_file)   # readr detects .gz and compresses automatically
-  cat(sprintf("Output: %s (%d covariates × %d samples)\n",
-              out_file, nrow(merged), length(keep_samples)))
+  raw_cov <- fread(opt$covFile, head = TRUE, data.table = FALSE, check.names = FALSE)
+  header_sample_hits <- sum(colnames(raw_cov)[-1] %in% colnames(mtx))
+  row_sample_hits <- sum(raw_cov[[1]] %in% pca_samples)
+
+  if (header_sample_hits >= row_sample_hits) {
+    covt <- as_tibble(raw_cov)
+    colnames(covt)[1] <- "#id"
+  } else {
+    covt <- transpose(as.data.table(raw_cov), keep.names = "#id", make.names = 1) %>% as_tibble()
+  }
+
+  overlap <- intersect(colnames(covt), colnames(mtx))
+  print(paste(ncol(covt) - 1, "samples are in the covariate file", sep = " "))
+  print(paste(ncol(mtx), "samples are in the PCA file", sep = " "))
+  print(paste(length(overlap) - 1, "samples overlap between covariate & PCA files and are included in the analysis:", sep = " "))
+  print(overlap[!overlap == "#id"])
+  if (length(overlap) <= 1) {
+    stop("No overlapping samples between covariate and PCA inputs")
+  }
+
+  cov_missing <- covt %>% select(-all_of(overlap))
+  print(paste(ncol(cov_missing), "samples in the covariate file are missing from the PCA file:", sep = " "))
+  print(colnames(cov_missing))
+
+  pca_missing <- mtx %>% select(-all_of(overlap))
+  print(paste(ncol(pca_missing), "samples in the PCA file are missing from the covariate file:", sep = " "))
+  print(colnames(pca_missing))
+
+  covt <- covt %>% select(all_of(overlap))
+  mtx <- mtx %>% select(all_of(overlap))
+  output <- bind_rows(covt, mtx)
+
+  if (opt$`tol-cov` == -1 && sum(is.na(output)) > 0) {
+    stop("NA in covariates input: Check input file or set parameter tol_cov to allow for removing missing values; mean_impute to allow for imputing missing values")
+  }
+
+  output <- output %>% as.data.frame
+  rownames(output) <- output$`#id`
+  output <- filter_mtx(output[, 2:ncol(output), drop = FALSE], opt$`tol-cov`) %>% as_tibble(rownames = "#id")
+  output_name <- if (!is.null(opt$name) && nzchar(opt$name)) {
+    opt$name
+  } else {
+    paste0(strip_last_ext(opt$covFile), ".", strip_last_ext(opt$pcaFile))
+  }
+  out_file <- file.path(opt$cwd, paste0(output_name, ".gz"))
+  output %>% write_delim(out_file, "\t")
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────

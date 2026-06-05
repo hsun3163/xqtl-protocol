@@ -31,16 +31,17 @@
 rule merge_pca_covariate:
     """Merge projected genotype PCs with phenotype-level fixed covariates."""
     input:
-        projected_rds  = "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.pca.projected.rds",
+        projected_rds  = lambda wc: get_projected_pca_rds(wc.theme),
         covariate_file = lambda wc: next(
             t["covariate_file"] for t in config["themes"] if t["name"] == wc.theme
         ),
     output:
-        merged_cov = "{cwd}/data_preprocessing/{theme}/covariates/xqtl_protocol_data.plink_qc.{theme}.pca.gz",
+        merged_cov = "{cwd}/data_preprocessing/{theme}/covariates/{merged_cov_base}.pca.gz",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
         outdir       = "{cwd}/data_preprocessing/{theme}/covariates",
+        output_name  = lambda wc: f"{get_merged_cov_base(wc.theme)}.pca",
         n_pcs        = config["covariate"]["n_pcs"],
         tol_cov      = config["covariate"]["tol_cov"],
         mean_impute  = lambda _: "--mean-impute" if config["covariate"]["mean_impute"] else "",
@@ -56,6 +57,7 @@ rule merge_pca_covariate:
             --cwd {params.outdir} \
             --pcaFile {input.projected_rds} \
             --covFile {input.covariate_file} \
+            --name {params.output_name} \
             --k {params.n_pcs} \
             --tol-cov {params.tol_cov} \
             {params.mean_impute} \
@@ -75,11 +77,12 @@ rule phenotype_by_chrom:
     input:
         phenotype_bed = lambda wc: get_phenotype_bed(wc),
     output:
-        chrom_list = "{cwd}/data_preprocessing/{theme}/phenotype_data/{theme}.phenotype_by_chrom_files.txt",
+        chrom_list = "{cwd}/data_preprocessing/{theme}/phenotype_data/{pheno_base}.phenotype_by_chrom_files.txt",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["rnaquant"],
         outdir       = "{cwd}/data_preprocessing/{theme}/phenotype_data",
+        output_name  = "{pheno_base}",
         chroms       = " ".join(config["chromosomes"]),
         dry_run     = DRY_RUN_SOS,
     threads: config["resources"]["default"]["threads"]
@@ -92,7 +95,7 @@ rule phenotype_by_chrom:
         sos run {params.pipeline_dir}/phenotype_formatting.ipynb phenotype_by_chrom {params.dry_run} \
             --cwd {params.outdir} \
             --phenoFile {input.phenotype_bed} \
-            --name {wildcards.theme} \
+            --name {params.output_name} \
             --chrom {params.chroms} \
             --container {params.container} \
             --numThreads {threads}
@@ -112,23 +115,24 @@ rule marchenko_pc:
     """Estimate hidden confounding factors via Marchenko-Pastur PCA."""
     input:
         phenotype_bed = lambda wc: get_phenotype_bed(wc),
-        merged_cov    = "{cwd}/data_preprocessing/{theme}/covariates/xqtl_protocol_data.plink_qc.{theme}.pca.gz",
+        merged_cov    = lambda wc: get_merged_cov_path(wc.theme),
     output:
-        hidden_factors = "{cwd}/data_preprocessing/{theme}/covariates/{theme}.Marchenko_PC.gz",
+        hidden_factors = "{cwd}/data_preprocessing/{theme}/covariates/{hidden_factor_base}.Marchenko_PC.gz",
     params:
-        pipeline_dir      = config["pipeline_dir"],
+        hidden_factor_notebook = get_pipeline_notebook_path("covariate_hidden_factor.ipynb"),
         container         = config["containers"]["pcatools"],
         outdir            = "{cwd}/data_preprocessing/{theme}/covariates",
         n_factors         = config["hidden_factors"]["n_factors"],
         mean_impute_flag  = lambda _: "--mean-impute-missing" if config["covariate"]["mean_impute"] else "",
-        dry_run     = DRY_RUN_SOS,
+        dry_run           = DRY_RUN_SOS,
     threads: config["resources"]["hidden_factors"]["threads"]
     resources:
         mem_mb   = config["resources"]["hidden_factors"]["mem_mb"],
         runtime = config["resources"]["hidden_factors"]["runtime"],
     shell:
         """
-        sos run {params.pipeline_dir}/covariate_hidden_factor.ipynb Marchenko_PC {params.dry_run} \
+        mkdir -p {params.outdir}
+        sos run {params.hidden_factor_notebook} Marchenko_PC {params.dry_run} \
             --cwd {params.outdir} \
             --phenoFile {input.phenotype_bed} \
             --covFile {input.merged_cov} \
@@ -150,9 +154,9 @@ rule peer_factors:
     """Estimate hidden confounding factors via PEER factor analysis."""
     input:
         phenotype_bed = lambda wc: get_phenotype_bed(wc),
-        merged_cov    = "{cwd}/data_preprocessing/{theme}/covariates/xqtl_protocol_data.plink_qc.{theme}.pca.gz",
+        merged_cov    = lambda wc: get_merged_cov_path(wc.theme),
     output:
-        hidden_factors = "{cwd}/data_preprocessing/{theme}/covariates/{theme}.PEER.gz",
+        hidden_factors = "{cwd}/data_preprocessing/{theme}/covariates/{hidden_factor_base}.PEER.gz",
     params:
         pipeline_dir     = config["pipeline_dir"],
         container        = config["containers"]["peer"],

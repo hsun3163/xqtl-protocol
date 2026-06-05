@@ -37,15 +37,17 @@ rule susie_twas:
     """Run univariate SuSiE fine-mapping and compute TWAS weights for all loci."""
     input:
         tensorqtl_done = "{cwd}/association_scan/{theme}/TensorQTL/.done_cis",
-        geno_list      = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
-        pheno_list     = "{cwd}/data_preprocessing/{theme}/phenotype_data/{theme}.phenotype_by_chrom_files.txt",
+        geno_list      = lambda wc: get_genotype_chrom_list(),
+        pheno_region_list = lambda wc: get_phenotype_region_list(wc.theme),
         hidden_factors = lambda wc: get_hidden_factors(wc),
     output:
         done = "{cwd}/finemapping/{theme}/susie_twas/.done_susie_twas",
     params:
-        pipeline_dir  = config["pipeline_dir"],
+        susie_notebook = get_pipeline_notebook_path("mnm_regression.ipynb"),
         container     = config["containers"]["susie"],
         outdir        = "{cwd}/finemapping/{theme}/susie_twas",
+        normalized_region_list = lambda wc: f"{config['cwd']}/finemapping/{wc.theme}/susie_twas/{get_phenotype_base(wc.theme)}.phenotype_by_chrom_files.region_list.normalized.txt",
+        cis_window    = config["association"]["cis_window"],
         L             = config["finemapping"]["L"],
         max_L         = config["finemapping"]["max_L"],
         pip_cutoff    = config["finemapping"]["pip_cutoff"],
@@ -60,12 +62,15 @@ rule susie_twas:
     shell:
         """
         mkdir -p {params.outdir}
-        sos run {params.pipeline_dir}/mnm_regression.ipynb susie_twas {params.dry_run} \
+        awk 'BEGIN{{FS=OFS="\\t"}} NR==1 {{$4="ID"}} {{print}}' {input.pheno_region_list} > {params.normalized_region_list}
+        sos run {params.susie_notebook} susie_twas {params.dry_run} \
             --cwd {params.outdir} \
+            --name {wildcards.theme} \
             --genoFile {input.geno_list} \
-            --phenoFile {input.pheno_list} \
+            --phenoFile {params.normalized_region_list} \
             --covFile {input.hidden_factors} \
-            --L {params.L} \
+            --cis-window {params.cis_window} \
+            --init-L {params.L} \
             --max-L {params.max_L} \
             --pip-cutoff {params.pip_cutoff} \
             --min_twas_maf {params.min_twas_maf} \
@@ -87,8 +92,7 @@ rule finemapping_plots:
     output:
         plots_done = "{cwd}/finemapping/{theme}/susie_twas_plots/.done_plots",
     params:
-        pipeline_dir    = config["pipeline_dir"],
-        container       = config["containers"]["susie"],
+        plot_script     = config["renovated_code_dir"] + "/pecotmr_integration/univariate_plot.R",
         finemapping_dir = "{cwd}/finemapping/{theme}/susie_twas",
         outdir          = "{cwd}/finemapping/{theme}/susie_twas_plots",
         pip_cutoff      = config["finemapping"]["pip_cutoff"],
@@ -100,11 +104,11 @@ rule finemapping_plots:
     shell:
         """
         mkdir -p {params.outdir}
-        sos run {params.pipeline_dir}/rss_analysis.ipynb univariate_plot {params.dry_run} \
-            --cwd {params.outdir} \
-            --finemapping-dir {params.finemapping_dir} \
-            --pip-cutoff {params.pip_cutoff} \
-            --container {params.container} \
-            --numThreads {threads}
+        find {params.finemapping_dir}/fine_mapping -name "*.univariate_bvsr.rds" | sort | while IFS= read -r rds; do
+            png_name="$(basename "$rds" .rds).png"
+            Rscript {params.plot_script} \
+                --input "$rds" \
+                --output "{params.outdir}/$png_name"
+        done
         touch {output.plots_done}
         """

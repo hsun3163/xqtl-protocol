@@ -52,6 +52,13 @@ if (is.null(opt[["tpm-gct"]])) stop("--tpm-gct is required")
 
 dir.create(opt$cwd, showWarnings = FALSE, recursive = TRUE)
 
+normalize_output_prefix <- function(path) {
+  stem <- sub("\\.(gct|GCT)(\\.gz)?$", "", basename(path))
+  stem <- sub("\\.gene_tpm$", "", stem)
+  stem <- sub("\\.tpm$", "", stem)
+  stem
+}
+
 # ── Step: qc_1 ───────────────────────────────────────────────────────────────
 run_qc_1 <- function(opt) {
   suppressPackageStartupMessages({
@@ -95,7 +102,7 @@ run_qc_1 <- function(opt) {
                 low_expr_TPM_percent * 100, "% samples with TPM <", low_expr_TPM))
   message(paste(sum(keep_genes_idx), "genes retained."))
 
-  bname    <- sub("\\.(gct|GCT)(\\.gz)?$", "", basename(tpm_file))
+  bname    <- normalize_output_prefix(tpm_file)
   out_file <- file.path(opt$cwd, paste0(bname, ".low_expression_filtered.tpm.gct.gz"))
 
   # Write with GCT-style comment header
@@ -185,7 +192,7 @@ run_qc_2 <- function(opt) {
   TPM_clean    <- TPM_data[, keep_samples, drop = FALSE]
   message(paste(ncol(TPM_clean), "samples retained after outlier removal."))
 
-  bname    <- sub("\\.(gct|GCT)(\\.gz)?$", "", basename(tpm_file))
+  bname    <- normalize_output_prefix(tpm_file)
   out_file <- file.path(opt$cwd, paste0(bname, ".outlier_removed.tpm.gct.gz"))
 
   cat(paste0("#1.2\n# ", nrow(TPM_clean), " ", ncol(TPM_clean), "\n"),
@@ -219,7 +226,7 @@ run_qc_3 <- function(opt) {
     filter(gene_ID %in% tpm$gene_ID) %>%
     select(colnames(tpm))
 
-  bname    <- sub("\\.(gct|GCT)(\\.gz)?$", "", basename(tpm_file))
+  bname    <- normalize_output_prefix(tpm_file)
   out_file <- file.path(opt$cwd, paste0(bname, ".geneCount.gct.gz"))
   out_tmp  <- sub("\\.gz$", "", out_file)
 

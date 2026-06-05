@@ -178,9 +178,19 @@ readPicard <- function(source_path, wasp_sfx, qc_sfx) {
 # ── Step: aggregate_picard_qc ─────────────────────────────────────────────────
 
 if (opt$step == "aggregate_picard_qc") {
-  picard_metrics <- readPicard(source_dir, wasp_suffix, qc_suffix)
-  write.table(picard_metrics, file = opt$output,
-              col.names = TRUE, row.names = FALSE, quote = FALSE)
+  alignment_files <- system(
+    paste("find -L", shQuote(source_dir), "-name '*.alignment_summary_metrics'"),
+    intern = TRUE
+  )
+  if (length(alignment_files) == 0) {
+    empty_metrics <- data.frame()
+    write.table(empty_metrics, file = opt$output,
+                col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+  } else {
+    picard_metrics <- readPicard(source_dir, wasp_suffix, qc_suffix)
+    write.table(picard_metrics, file = opt$output,
+                col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+  }
 } else {
   stop(paste0("Unknown step: '", opt$step, "'. Valid steps: aggregate_picard_qc"))
 }

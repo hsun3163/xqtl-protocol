@@ -50,19 +50,21 @@ _run() {
         if [[ -n "$CONTAINER" ]]; then
             printf '  singularity exec %s \\\n' "$CONTAINER" >&2
             printf '    %s %s \\\n' "$lang" "$script" >&2
+            printf '    --step %s \\\n' "$STEP" >&2
             printf '    %s \\\n' "${PASS_ARGS[@]}" >&2
             echo "    --dry-run" >&2
         else
             printf '  %s %s \\\n' "$lang" "$script" >&2
+            printf '    --step %s \\\n' "$STEP" >&2
             printf '    %s \\\n' "${PASS_ARGS[@]}" >&2
             echo "  --dry-run" >&2
         fi
         return 0
     fi
     if [[ -n "$CONTAINER" ]]; then
-        singularity exec "$CONTAINER" "$lang" "$script" "${PASS_ARGS[@]}"
+        singularity exec "$CONTAINER" "$lang" "$script" --step "$STEP" "${PASS_ARGS[@]}"
     else
-        "$lang" "$script" "${PASS_ARGS[@]}"
+        "$lang" "$script" --step "$STEP" "${PASS_ARGS[@]}"
     fi
 }
 

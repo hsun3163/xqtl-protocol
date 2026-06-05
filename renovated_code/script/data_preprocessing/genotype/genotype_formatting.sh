@@ -28,6 +28,7 @@ CWD="output"
 NAME=""
 CHROM=()
 NUM_THREADS=8
+MEM_LIMIT=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --genoFile)     GENO_FILE="$2";    shift 2 ;;
         --cwd)          CWD="$2";          shift 2 ;;
         --name)         NAME="$2";         shift 2 ;;
+        --mem)          MEM_LIMIT="$2";    shift 2 ;;
         --chrom)
             shift
             while [[ $# -gt 0 && "$1" != --* ]]; do
@@ -57,6 +59,33 @@ if [[ -z "$NAME" ]]; then
     NAME="${NAME%.vcf.gz}"; NAME="${NAME%.vcf}"; NAME="${NAME%.bed}"
 fi
 
+_mem_spec_to_mb() {
+    local spec="${1^^}"
+    spec="${spec// /}"
+    [[ -z "$spec" ]] && return 1
+    if [[ "$spec" =~ ^([0-9]+)([KMGTP]?)B?$ ]]; then
+        local value="${BASH_REMATCH[1]}"
+        local unit="${BASH_REMATCH[2]}"
+        case "$unit" in
+            ""|M) echo "$value" ;;
+            K) echo $(( (value + 999) / 1000 )) ;;
+            G) echo "$((value * 1000))" ;;
+            T) echo "$((value * 1000 * 1000))" ;;
+            P) echo "$((value * 1000 * 1000 * 1000))" ;;
+            *) return 1 ;;
+        esac
+        return 0
+    fi
+    return 1
+}
+
+_plink_workspace_mb() {
+    local total_mb
+    total_mb="$(_mem_spec_to_mb "$1")" || return 1
+    # Match the source notebook behavior and leave headroom under the task cap.
+    echo $(( total_mb * 9 / 10 ))
+}
+
 # ── Step implementations ─────────────────────────────────────────────────────
 
 _vcf_to_plink() {
@@ -67,7 +96,6 @@ _vcf_to_plink() {
         --make-bed \
         --out "${outdir}/${name}" \
         --threads "$threads" \
-        --memory 16000 \
         --no-psam-pheno \
         --set-missing-var-ids '@:#:\$r:\$a' \
         --new-id-max-allele-len 1000
@@ -75,86 +103,143 @@ _vcf_to_plink() {
 }
 
 _merge_plink() {
-    local file_list="$1" outdir="$2" name="$3" threads="$4"
+    local file_list="$1" outdir="$2" name="$3" threads="$4" mem_spec="${5:-}"
     echo "=== merge_plink: merging files in $file_list ===" >&2
 
-    # Determine input type (VCF list or PLINK list)
-    local first_file
-    first_file="$(head -1 "$file_list")"
-
-    local tmp_merge="${outdir}/${name}_merge_list.txt"
-
-    if [[ "$first_file" == *.vcf.gz || "$first_file" == *.vcf ]]; then
-        # Convert each VCF to plink, then merge
-        > "$tmp_merge"
-        while IFS= read -r vcf; do
-            [[ -z "$vcf" ]] && continue
-            local bname
-            bname="$(basename "$vcf" .vcf.gz)"; bname="${bname%.vcf}"
-            local tmp_out="${outdir}/tmp_${bname}"
-            plink2 --vcf "$vcf" --make-bed --out "$tmp_out" \
-                --threads "$threads" --memory 16000 --no-psam-pheno \
-                --set-missing-var-ids '@:#:\$r:\$a' --new-id-max-allele-len 1000
-            echo "$tmp_out" >> "$tmp_merge"
-        done < "$file_list"
+    local -a inputs=()
+    if [[ -f "$file_list" ]]; then
+        mapfile -t inputs < "$file_list"
     else
-        # PLINK files — strip .bed extension for merge list
-        while IFS= read -r f; do
-            [[ -z "$f" ]] && continue
-            echo "${f%.bed}" >> "$tmp_merge"
-        done < "$file_list"
+        read -r -a inputs <<< "$file_list"
     fi
 
-    # plink1 merge (plink2 pmerge for large sets)
+    [[ "${#inputs[@]}" -eq 0 ]] && { echo "ERROR: merge_plink received no input files" >&2; exit 1; }
+
+    # Determine input type (VCF list, PLINK1 bed, or PLINK2 pgen)
+    local first_file
+    first_file="${inputs[0]}"
+    local input_kind="bed"
+
+    local tmp_merge="${outdir}/${name}_merge_list.txt"
+    > "$tmp_merge"
+
+    if [[ "$first_file" == *.vcf.gz || "$first_file" == *.vcf ]]; then
+        echo "ERROR: merge_plink expects PLINK inputs, not VCF inputs." >&2
+        echo "ERROR: Run the notebook-defined vcf_to_plink stage first, then merge_plink." >&2
+        exit 2
+    elif [[ "$first_file" == *.pgen ]]; then
+        input_kind="pgen"
+    fi
+
+    # Strip the file-type extension for the merge list.
+    for f in "${inputs[@]}"; do
+        [[ -z "$f" ]] && continue
+        if [[ "$input_kind" == "pgen" ]]; then
+            echo "${f%.pgen}" >> "$tmp_merge"
+        else
+            echo "${f%.bed}" >> "$tmp_merge"
+        fi
+    done
+
+    local -a memory_arg=()
+    if [[ -n "$mem_spec" ]]; then
+        local plink_mem_mb
+        if plink_mem_mb="$(_plink_workspace_mb "$mem_spec")"; then
+            echo "Using PLINK memory cap: ${plink_mem_mb} MB (from task mem ${mem_spec})" >&2
+            memory_arg=(--memory "$plink_mem_mb")
+        else
+            echo "WARN: Could not parse --mem ${mem_spec}; falling back to PLINK default memory behavior" >&2
+        fi
+    fi
+
     local n_files
     n_files="$(wc -l < "$tmp_merge")"
     if [[ "$n_files" -eq 1 ]]; then
         # Only one file — just rename
         local src
         src="$(cat "$tmp_merge")"
-        for ext in bed bim fam; do
-            cp "${src}.${ext}" "${outdir}/${name}.${ext}"
-        done
+        if [[ "$input_kind" == "pgen" ]]; then
+            for ext in pgen pvar psam; do
+                cp "${src}.${ext}" "${outdir}/${name}.${ext}"
+            done
+        else
+            for ext in bed bim fam; do
+                cp "${src}.${ext}" "${outdir}/${name}.${ext}"
+            done
+        fi
     else
         local first_file_prefix
         first_file_prefix="$(head -1 "$tmp_merge")"
         tail -n +2 "$tmp_merge" > "${tmp_merge}.rest"
-        plink --bfile "$first_file_prefix" \
-              --merge-list "${tmp_merge}.rest" \
-              --make-bed \
-              --out "${outdir}/${name}" \
-              --threads "$threads"
+        if [[ "$input_kind" == "pgen" ]]; then
+            plink2 --pfile "$first_file_prefix" \
+                   --pmerge-list "${tmp_merge}.rest" \
+                   --make-pgen \
+                   --out "${outdir}/${name}" \
+                   --threads "$threads" \
+                   "${memory_arg[@]}"
+        else
+            plink --keep-allele-order --bfile "$first_file_prefix" \
+                  --merge-list "${tmp_merge}.rest" \
+                  --make-bed \
+                  --out "${outdir}/${name}" \
+                  --threads "$threads" \
+                  "${memory_arg[@]}"
+        fi
         rm -f "${tmp_merge}.rest"
     fi
     rm -f "$tmp_merge"
-    echo "Output: ${outdir}/${name}.{bed,bim,fam}" >&2
+    if [[ "$input_kind" == "pgen" ]]; then
+        echo "Output: ${outdir}/${name}.{pgen,pvar,psam}" >&2
+    else
+        echo "Output: ${outdir}/${name}.{bed,bim,fam}" >&2
+    fi
 }
 
 _genotype_by_chrom() {
-    local bed="$1" outdir="$2" name="$3" threads="$4"
-    shift 4
+    local bed="$1" outdir="$2" name="$3" threads="$4" mem_spec="${5:-}"
+    shift 5
     local chroms=("$@")
     echo "=== genotype_by_chrom: splitting ${#chroms[@]} chromosomes ===" >&2
 
     local manifest="${outdir}/${name}.genotype_by_chrom_files.txt"
     > "$manifest"
 
+    local -a memory_arg=()
+    if [[ -n "$mem_spec" ]]; then
+        local plink_mem_mb
+        if plink_mem_mb="$(_plink_workspace_mb "$mem_spec")"; then
+            memory_arg=(--memory "$plink_mem_mb")
+        fi
+    fi
+
     for chrom in "${chroms[@]}"; do
-        local out="${outdir}/${name}.${chrom}"
+        local chrom_label="$chrom"
+        chrom_label="${chrom_label#[}"
+        chrom_label="${chrom_label%]}"
+        chrom_label="${chrom_label#,}"
+        chrom_label="${chrom_label%,}"
+        chrom_label="${chrom_label#\'}"
+        chrom_label="${chrom_label%\'}"
+        chrom_label="${chrom_label#\"}"
+        chrom_label="${chrom_label%\"}"
+        local chrom_query="${chrom_label#chr}"
+        local out="${outdir}/${name}.${chrom_label}"
         plink2 \
             --bfile "${bed%.bed}" \
-            --chr "$chrom" \
+            --chr "$chrom_query" \
             --make-bed \
             --out "$out" \
             --threads "$threads" \
-            --memory 16000
+            --allow-no-sex \
+            "${memory_arg[@]}"
         echo "${out}.bed" >> "$manifest"
         echo "  Written: ${out}.{bed,bim,fam}" >&2
     done
     echo "Manifest: $manifest" >&2
 }
 
-export -f _vcf_to_plink _merge_plink _genotype_by_chrom
+export -f _mem_spec_to_mb _plink_workspace_mb _vcf_to_plink _merge_plink _genotype_by_chrom
 
 # ── Dry-run: print parameters and exit ───────────────────────────────────────
 if [[ "$DRY_RUN" == "true" ]]; then
@@ -166,6 +251,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     printf '    --genoFile %s \\\n'   "$GENO_FILE"  >&2
     printf '    --cwd %s \\\n'        "$CWD"         >&2
     [[ -n "$NAME" ]] && printf '    --name %s \\\n' "$NAME" >&2
+    [[ -n "$MEM_LIMIT" ]] && printf '    --mem %s \\\n' "$MEM_LIMIT" >&2
     [[ ${#CHROM[@]} -gt 0 ]] && printf '    --chrom %s \\\n' "${CHROM[*]}" >&2
     printf '    --numThreads %s\n'     "$NUM_THREADS" >&2
     echo "[DRY-RUN] Input file check:" >&2
@@ -182,11 +268,11 @@ _dispatch() {
             _vcf_to_plink "$GENO_FILE" "$CWD" "$NAME" "$NUM_THREADS"
             ;;
         merge_plink)
-            _merge_plink "$GENO_FILE" "$CWD" "$NAME" "$NUM_THREADS"
+            _merge_plink "$GENO_FILE" "$CWD" "$NAME" "$NUM_THREADS" "$MEM_LIMIT"
             ;;
         genotype_by_chrom)
             [[ ${#CHROM[@]} -eq 0 ]] && { echo "ERROR: --chrom is required for genotype_by_chrom" >&2; exit 1; }
-            _genotype_by_chrom "$GENO_FILE" "$CWD" "$NAME" "$NUM_THREADS" "${CHROM[@]}"
+            _genotype_by_chrom "$GENO_FILE" "$CWD" "$NAME" "$NUM_THREADS" "$MEM_LIMIT" "${CHROM[@]}"
             ;;
         *)
             echo "ERROR: Unknown step '$STEP'. Available: vcf_to_plink, merge_plink, genotype_by_chrom" >&2
@@ -197,9 +283,9 @@ _dispatch() {
 if [[ -n "$CONTAINER" ]]; then
     # Re-export all parsed variables into the container
     singularity exec "$CONTAINER" bash -s << EOF
-$(declare -f _vcf_to_plink _merge_plink _genotype_by_chrom)
+$(declare -f _mem_spec_to_mb _plink_workspace_mb _vcf_to_plink _merge_plink _genotype_by_chrom)
 STEP="$STEP" GENO_FILE="$GENO_FILE" CWD="$CWD" NAME="$NAME"
-NUM_THREADS="$NUM_THREADS" CHROM=(${CHROM[*]+"${CHROM[*]}"})
+NUM_THREADS="$NUM_THREADS" MEM_LIMIT="$MEM_LIMIT" CHROM=(${CHROM[*]+"${CHROM[*]}"})
 $(declare -f _dispatch)
 _dispatch
 EOF

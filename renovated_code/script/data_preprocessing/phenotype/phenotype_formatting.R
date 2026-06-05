@@ -5,6 +5,7 @@
 #
 # Steps (selected via --step):
 #   gct_extract_samples — filter samples from a GCT file by a keep-list
+#   phenotype_annotate_by_tad — build a phenotype-per-TAD region list
 #
 # Flags are kept identical to the SoS notebook parameter names.
 # ============================================================
@@ -29,6 +30,12 @@ opt_list <- list(
               help = "Output name prefix (default: derived from phenoFile)"),
   make_option("--keep-samples", type = "character", default = NULL,
               help = "[gct_extract_samples] File with one sample ID per line to keep"),
+  make_option("--TAD_list",     type = "character", default = NULL,
+              help = "[phenotype_annotate_by_tad] Input TAD list"),
+  make_option("--phenotype-per-tad", type = "integer", default = 2,
+              help = "[phenotype_annotate_by_tad] Minimum phenotype count per region"),
+  make_option("--output",       type = "character", default = NULL,
+              help = "Optional explicit output file path"),
   make_option("--numThreads",   type = "integer",   default = 1,
               help = "Number of threads [default: 1]")
 )
@@ -90,10 +97,53 @@ gct_extract_samples <- function(opt) {
   cat(sprintf("Written: %s\n", out_file))
 }
 
+phenotype_annotate_by_tad <- function(opt) {
+  suppressPackageStartupMessages({
+    library(purrr)
+    library(tibble)
+  })
+
+  if (is.null(opt$TAD_list)) stop("--TAD_list is required")
+
+  tabix_region <- function(file, region) {
+    data.table::fread(cmd = paste("tabix -h", shQuote(file), shQuote(region))) %>%
+      as_tibble() %>%
+      mutate(
+        !!names(.)[1] := as.character(.data[[names(.)[1]]]),
+        !!names(.)[2] := as.numeric(.data[[names(.)[2]]])
+      )
+  }
+
+  tad_df <- read_delim(opt$TAD_list, show_col_types = FALSE) %>%
+    mutate(
+      region = paste0(`#chr`, ":", start, "-", end),
+      path = opt$phenoFile,
+      keep = map_lgl(region, ~ nrow(tabix_region(opt$phenoFile, .x)) >= opt$`phenotype-per-tad`)
+    ) %>%
+    filter(keep) %>%
+    select(`#chr`, start, end, ID = index, path)
+
+  out_file <- opt$output
+  if (is.null(out_file) || !nzchar(out_file)) {
+    out_file <- file.path(
+      opt$cwd,
+      paste0(
+        basename(opt$phenoFile), ".",
+        basename(opt$TAD_list), ".",
+        opt$`phenotype-per-tad`, "_pheno_per_region.region_list"
+      )
+    )
+  }
+  dir.create(dirname(out_file), showWarnings = FALSE, recursive = TRUE)
+  write_delim(tad_df, out_file, "\t")
+  cat(sprintf("Written: %s\n", out_file))
+}
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 switch(opt$step,
   gct_extract_samples = gct_extract_samples(opt),
-  stop(sprintf("Unknown step: '%s'. Available: gct_extract_samples", opt$step))
+  phenotype_annotate_by_tad = phenotype_annotate_by_tad(opt),
+  stop(sprintf("Unknown step: '%s'. Available: gct_extract_samples, phenotype_annotate_by_tad", opt$step))
 )

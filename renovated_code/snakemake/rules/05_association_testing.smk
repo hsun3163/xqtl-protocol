@@ -31,19 +31,28 @@
 rule tensorqtl_cis:
     """Run TensorQTL cis-QTL nominal + permutation scan across all chromosomes."""
     input:
-        geno_list      = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
-        pheno_list     = "{cwd}/data_preprocessing/{theme}/phenotype_data/{theme}.phenotype_by_chrom_files.txt",
+        geno_list      = lambda wc: get_genotype_chrom_list(),
+        phenotype_bed  = lambda wc: get_phenotype_bed(wc),
+        pheno_list     = lambda wc: get_phenotype_chrom_list(wc.theme),
         hidden_factors = lambda wc: get_hidden_factors(wc),
     output:
         done = "{cwd}/association_scan/{theme}/TensorQTL/.done_cis",
     params:
-        pipeline_dir = config["pipeline_dir"],
-        container    = config["containers"]["tensorqtl"],
+        tensorqtl_notebook = get_pipeline_notebook_path("TensorQTL.ipynb"),
+        compat_python  = COMPAT_PYTHON,
         outdir       = "{cwd}/association_scan/{theme}/TensorQTL",
+        normalized_geno_manifest = lambda wc: (
+            f"{config['cwd']}/association_scan/{wc.theme}/TensorQTL/"
+            f"{PLINK_QC_BASENAME}.genotype_by_chrom_files.normalized.txt"
+        ),
+        normalized_pheno_manifest = lambda wc: (
+            f"{config['cwd']}/association_scan/{wc.theme}/TensorQTL/"
+            f"{get_phenotype_base(wc.theme)}.phenotype_by_chrom_files.normalized.txt"
+        ),
         cis_window   = config["association"]["cis_window"],
         mac          = config["association"]["mac_threshold"],
         maf          = config["association"]["maf_threshold"],
-        dry_run     = DRY_RUN_SOS,
+        dry_run      = DRY_RUN_SOS,
     threads: config["resources"]["tensorqtl"]["threads"]
     resources:
         mem_mb   = config["resources"]["tensorqtl"]["mem_mb"],
@@ -51,15 +60,40 @@ rule tensorqtl_cis:
     shell:
         """
         mkdir -p {params.outdir}
-        sos run {params.pipeline_dir}/TensorQTL.ipynb cis {params.dry_run} \
-            --cwd {params.outdir} \
-            --genotype-file {input.geno_list} \
-            --phenotype-file {input.pheno_list} \
-            --covariate-file {input.hidden_factors} \
-            --window {params.cis_window} \
-            --MAC {params.mac} \
-            --maf-threshold {params.maf} \
-            --container {params.container} \
-            --numThreads {threads}
+        awk 'BEGIN{{FS=OFS="\\t"}} NR==1 {{print "#id","#path"; next}} {{$1=$1; sub(/^chr/, "", $1); print $1, $2}}' {input.geno_list} > {params.normalized_geno_manifest}
+        awk 'BEGIN{{FS=OFS="\\t"}} NR==1 {{print "#id","#path"; next}} {{$1=$1; sub(/^chr/, "", $1); print $1, $2}}' {input.pheno_list} > {params.normalized_pheno_manifest}
+        geno_rows="$(awk 'END {{print NR-1}}' {params.normalized_geno_manifest})"
+        pheno_rows="$(awk 'END {{print NR-1}}' {params.normalized_pheno_manifest})"
+        chrom_args="$(awk 'NR>1 {{print $1}}' {params.normalized_geno_manifest} | paste -sd ' ' -)"
+        if [ -z "$chrom_args" ]; then
+            echo "ERROR: normalized genotype manifest is empty" >&2
+            exit 1
+        fi
+        if [ "$geno_rows" -eq 1 ] && [ "$pheno_rows" -eq 1 ]; then
+            geno_bed="$(awk 'NR==2 {{print $2}}' {params.normalized_geno_manifest})"
+            XQTL_PATCH_TENSORQTL_SORT=1 PYTHONPATH="{params.compat_python}${{PYTHONPATH:+:$PYTHONPATH}}" \
+            sos run {params.tensorqtl_notebook} cis {params.dry_run} \
+                --cwd {params.outdir} \
+                --genotype-file "$geno_bed" \
+                --phenotype-file {input.phenotype_bed} \
+                --chromosome $chrom_args \
+                --covariate-file {input.hidden_factors} \
+                --window {params.cis_window} \
+                --MAC {params.mac} \
+                --maf-threshold {params.maf} \
+                --numThreads {threads}
+        else
+            XQTL_PATCH_TENSORQTL_SORT=1 PYTHONPATH="{params.compat_python}${{PYTHONPATH:+:$PYTHONPATH}}" \
+            sos run {params.tensorqtl_notebook} cis {params.dry_run} \
+                --cwd {params.outdir} \
+                --genotype-file {params.normalized_geno_manifest} \
+                --phenotype-file {params.normalized_pheno_manifest} \
+                --chromosome $chrom_args \
+                --covariate-file {input.hidden_factors} \
+                --window {params.cis_window} \
+                --MAC {params.mac} \
+                --maf-threshold {params.maf} \
+                --numThreads {threads}
+        fi
         touch {output.done}
         """

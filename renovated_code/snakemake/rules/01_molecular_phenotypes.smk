@@ -71,6 +71,14 @@ rule rnaseqc_call:
         data_dir     = lambda wc: next(
             t["data_dir"] for t in config["themes"] if t["name"] == wc.theme
         ),
+        bam_list_arg = lambda wc: (
+            f"--bam_list {next(t.get('bam_list', '') for t in config['themes'] if t['name'] == wc.theme)}"
+            if next(t.get("bam_list", "") for t in config["themes"] if t["name"] == wc.theme)
+            else ""
+        ),
+        bam_source_dir = lambda wc: next(
+            t.get("bam_source_dir", "") for t in config["themes"] if t["name"] == wc.theme
+        ),
         gtf          = config["reference"]["gtf_collapsed"],
         fasta        = config["reference"]["fasta"],
         outdir       = "{cwd}/{theme}/molecular_phenotypes",
@@ -82,12 +90,17 @@ rule rnaseqc_call:
     shell:
         """
         mkdir -p {params.outdir}
+        if [ -n "{params.bam_source_dir}" ]; then
+            mkdir -p {params.outdir}/..
+            ln -sfn {params.bam_source_dir} {params.outdir}/../bam
+        fi
         sos run {params.pipeline_dir}/RNA_calling.ipynb rnaseqc_call {params.dry_run} \
             --cwd {params.outdir} \
             --sample-list {input.sample_list} \
             --data-dir {params.data_dir} \
             --gtf {params.gtf} \
             --reference-fasta {params.fasta} \
+            {params.bam_list_arg} \
             --container {params.container} \
             --numThreads {threads}
         """

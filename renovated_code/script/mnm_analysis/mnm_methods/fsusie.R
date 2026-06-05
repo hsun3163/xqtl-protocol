@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # fsusie.R — Functional SuSiE fine-mapping for epigenomic QTL
-# Called directly by route3 SoS notebook task blocks.
+# Called directly by modular_sos SoS notebook task blocks.
 #
 # Usage:
 #   Rscript fsusie.R \

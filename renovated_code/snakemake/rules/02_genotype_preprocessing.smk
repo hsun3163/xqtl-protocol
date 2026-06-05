@@ -59,9 +59,9 @@ rule vcf_to_plink:
             vcf_idx=range(len(config["genotype"]["vcf_files"]))
         ),
     output:
-        bed = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.converted.bed",
-        bim = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.converted.bim",
-        fam = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.converted.fam",
+        bed = "{cwd}/data_preprocessing/genotype/" + CONVERTED_PLINK_BASENAME + ".bed",
+        bim = "{cwd}/data_preprocessing/genotype/" + CONVERTED_PLINK_BASENAME + ".bim",
+        fam = "{cwd}/data_preprocessing/genotype/" + CONVERTED_PLINK_BASENAME + ".fam",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
@@ -82,7 +82,6 @@ rule vcf_to_plink:
             sos run {params.pipeline_dir}/genotype_formatting.ipynb merge_plink {params.dry_run} \
                 --cwd {params.outdir} \
                 --genoFile {params.vcf_list} \
-                --name xqtl_protocol_data.converted \
                 --container {params.container} \
                 --numThreads {threads}
         else
@@ -90,7 +89,6 @@ rule vcf_to_plink:
             sos run {params.pipeline_dir}/genotype_formatting.ipynb vcf_to_plink {params.dry_run} \
                 --cwd {params.outdir} \
                 --genoFile $(cat {params.vcf_list}) \
-                --name xqtl_protocol_data.converted \
                 --container {params.container} \
                 --numThreads {threads}
         fi
@@ -109,9 +107,9 @@ rule plink_qc:
     input:
         bed = get_input_plink,
     output:
-        bed = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bed",
-        bim = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bim",
-        fam = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.fam",
+        bed = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".bed",
+        bim = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".bim",
+        fam = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".fam",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
@@ -131,7 +129,6 @@ rule plink_qc:
         sos run {params.pipeline_dir}/GWAS_QC.ipynb qc_no_prune {params.dry_run} \
             --cwd {params.outdir} \
             --genoFile {input.bed} \
-            --name xqtl_protocol_data.plink_qc \
             --mac-filter {params.mac_filter} \
             --maf-filter {params.maf_filter} \
             --geno-filter {params.geno_filter} \
@@ -151,9 +148,9 @@ rule plink_qc:
 rule genotype_by_chrom:
     """Split plink genotype into per-chromosome files for parallel QTL analysis."""
     input:
-        bed = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.bed",
+        bed = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".bed",
     output:
-        chrom_list = "{cwd}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
+        chrom_list = "{cwd}/data_preprocessing/genotype/" + PLINK_QC_BASENAME + ".genotype_by_chrom_files.txt",
     params:
         pipeline_dir = config["pipeline_dir"],
         container    = config["containers"]["bioinfo"],
@@ -169,7 +166,6 @@ rule genotype_by_chrom:
         sos run {params.pipeline_dir}/genotype_formatting.ipynb genotype_by_chrom {params.dry_run} \
             --cwd {params.outdir} \
             --genoFile {input.bed} \
-            --name xqtl_protocol_data.plink_qc \
             --chrom {params.chroms} \
             --container {params.container} \
             --numThreads {threads}

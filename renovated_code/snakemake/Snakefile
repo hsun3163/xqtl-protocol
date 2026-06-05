@@ -54,17 +54,18 @@ CHROMS      = config["chromosomes"]
 NORM_METHOD = config["normalization"]["method"]
 HF_METHOD   = config["hidden_factors"]["method"]
 
-# Route 3: SoS wrapper notebooks that call modular scripts instead of inline code.
-# rules/sos/*.smk use these to redirect sos run calls to route3/notebooks/.
+# Modular SoS: SoS wrapper notebooks that call modular scripts instead of inline code.
+# rules/sos/*.smk use these to redirect sos run calls to modular_sos/notebooks/.
 _SNAKEFILE_DIR   = _Path(workflow.snakefile).parent
-ROUTE3_NOTEBOOKS = config.get(
-    "route3_notebooks_dir",
-    str(_SNAKEFILE_DIR / "route3" / "notebooks"),
+MODULAR_SOS_NOTEBOOKS = config.get(
+    "modular_sos_notebooks_dir",
+    str(_SNAKEFILE_DIR / "modular_sos" / "notebooks"),
 )
 RENOVATED_CODE = config.get(
     "renovated_code_dir",
     str(_SNAKEFILE_DIR.parent.parent / "renovated_code"),
 )
+COMPAT_PYTHON = str(_SNAKEFILE_DIR / "compat" / "python")
 
 # ── Dry-run flags (propagated to every external call) ───────────────────────
 # SoS: "sos run notebook.ipynb step ... -n"  — prints plan, runs nothing (-n goes after all parameters)
@@ -72,15 +73,108 @@ RENOVATED_CODE = config.get(
 DRY_RUN_SOS    = "-n" if config.get("dry_run", False) else ""
 DRY_RUN_NATIVE = "--dry-run" if config.get("dry_run", False) else ""
 
+
+def _strip_suffixes(path_str, suffixes):
+    name = _Path(str(path_str)).name
+    changed = True
+    while changed:
+        changed = False
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                changed = True
+                break
+    return name
+
+
+def _bn(path_str):
+    name = _Path(str(path_str)).name
+    return name.rsplit(".", 1)[0] if "." in name else name
+
+
+def _theme_cfg(theme):
+    return next(t for t in config["themes"] if t["name"] == theme)
+
+
+def get_pipeline_notebook_path(notebook_name):
+    return str((_Path(config["pipeline_dir"]) / notebook_name).resolve())
+
+
+def _vcf_basename(path_str):
+    return _strip_suffixes(path_str, [".gz", ".bgz", ".bz2", ".xz", ".vcf", ".bcf"])
+
+
+def _plink_basename(path_str):
+    return _strip_suffixes(path_str, [".bed", ".bim", ".fam", ".pgen", ".pvar", ".psam"])
+
+
+def _phenotype_basename(path_str):
+    return _strip_suffixes(path_str, [".gz", ".bed"])
+
+
+def _infer_multi_vcf_basename(vcf_files):
+    stems = [_vcf_basename(path_str) for path_str in vcf_files]
+    normalized = []
+    for stem in stems:
+        match = re.match(
+            r"^(?P<base>.+?)\.chr(?:[0-9]+|X|Y|M|MT)(?:\..*)?$",
+            stem,
+            re.IGNORECASE,
+        )
+        if not match:
+            raise ValueError(
+                "Multiple genotype VCF inputs require either genotype.basename "
+                "or chromosome-tagged VCF names like '*.chr1.*.vcf.gz'. "
+                f"Could not infer merged basename from: {stem}"
+            )
+        normalized.append(match.group("base"))
+    basenames = sorted(set(normalized))
+    if len(basenames) != 1:
+        raise ValueError(
+            "Multiple genotype VCF inputs did not resolve to one merged basename. "
+            f"Resolved candidates: {', '.join(basenames)}. "
+            "Set genotype.basename explicitly in the config if needed."
+        )
+    return basenames[0]
+
+
+PREBUILT_PLINK = config["genotype"].get("plink_bed", "")
+VCF_FILES = config["genotype"].get("vcf_files", [])
+GENOTYPE_BASENAME = config["genotype"].get("basename", "")
+
+if PREBUILT_PLINK:
+    INPUT_PLINK_BASENAME = _plink_basename(PREBUILT_PLINK)
+else:
+    INPUT_PLINK_BASENAME = ""
+
+if VCF_FILES:
+    if len(VCF_FILES) == 1:
+        CONVERTED_PLINK_BASENAME = _vcf_basename(VCF_FILES[0])
+    elif GENOTYPE_BASENAME:
+        CONVERTED_PLINK_BASENAME = GENOTYPE_BASENAME
+    else:
+        CONVERTED_PLINK_BASENAME = _infer_multi_vcf_basename(VCF_FILES)
+elif PREBUILT_PLINK:
+    CONVERTED_PLINK_BASENAME = INPUT_PLINK_BASENAME
+else:
+    raise ValueError(
+        "No genotype input was provided. Supply either genotype.vcf_files or genotype.plink_bed."
+    )
+
+if not INPUT_PLINK_BASENAME:
+    INPUT_PLINK_BASENAME = CONVERTED_PLINK_BASENAME
+
+PLINK_QC_BASENAME = f"{INPUT_PLINK_BASENAME}.plink_qc"
+
 # ── Helper: resolve the normalized phenotype BED for a given theme ───────────
-def get_phenotype_bed(wc):
+def get_phenotype_bed_by_theme(theme):
     """Return the normalized phenotype BED.gz path for a theme wildcard."""
-    theme_cfg = next(t for t in config["themes"] if t["name"] == wc.theme)
+    theme_cfg = _theme_cfg(theme)
     if config["start_from"] == "phenotype_bed":
         bed = theme_cfg.get("phenotype_bed", "")
         if not bed:
             raise ValueError(
-                f"Theme '{wc.theme}': start_from is 'phenotype_bed' "
+                f"Theme '{theme}': start_from is 'phenotype_bed' "
                 "but no phenotype_bed path was provided in config."
             )
         return bed
@@ -89,33 +183,142 @@ def get_phenotype_bed(wc):
         # If imputation is enabled the downstream file is {theme}.bed.imputed.bed.gz
         # (SoS names it by stripping the last extension of the input, which for
         # "{theme}.bed.gz" gives "{theme}.bed", then appends ".imputed.bed.gz").
-        base = f"{CWD}/{wc.theme}/phenotype_preprocessing"
+        base = f"{CWD}/{theme}/phenotype_preprocessing"
         if config["phenotype_preprocessing"].get("run_imputation", False):
-            return f"{base}/{wc.theme}.bed.imputed.bed.gz"
-        return f"{base}/{wc.theme}.bed.gz"
+            return f"{base}/{theme}.bed.imputed.bed.gz"
+        return f"{base}/{theme}.bed.gz"
     # BED is produced by the normalization step (fastq path)
     return (
-        f"{CWD}/{wc.theme}/molecular_phenotypes/"
-        f"{wc.theme}.{NORM_METHOD}.expression.bed.gz"
+        f"{CWD}/{theme}/molecular_phenotypes/"
+        f"{theme}.{NORM_METHOD}.expression.bed.gz"
+    )
+
+
+def get_phenotype_bed(wc):
+    return get_phenotype_bed_by_theme(wc.theme)
+
+
+def get_phenotype_base(theme):
+    return _phenotype_basename(get_phenotype_bed_by_theme(theme))
+
+
+def get_theme_covariate_file(theme):
+    return _theme_cfg(theme)["covariate_file"]
+
+
+def get_theme_covariate_base(theme):
+    return _bn(get_theme_covariate_file(theme))
+
+
+def get_plink_qc_bed():
+    return f"{CWD}/data_preprocessing/genotype/{PLINK_QC_BASENAME}.bed"
+
+
+def get_genotype_chrom_list():
+    return f"{CWD}/data_preprocessing/genotype/{PLINK_QC_BASENAME}.genotype_by_chrom_files.txt"
+
+
+def get_sample_match_prefix(theme):
+    return get_phenotype_base(theme)
+
+
+def get_sample_genotypes_path(theme):
+    return (
+        f"{CWD}/data_preprocessing/{theme}/genotype_data/"
+        f"{get_sample_match_prefix(theme)}.sample_genotypes.txt"
+    )
+
+
+def get_sample_overlap_path(theme):
+    return (
+        f"{CWD}/data_preprocessing/{theme}/genotype_data/"
+        f"{get_sample_match_prefix(theme)}.sample_overlap.txt"
+    )
+
+
+def get_king_prefix(theme):
+    return f"{PLINK_QC_BASENAME}.{theme}"
+
+
+def get_unrelated_bed(theme):
+    return f"{CWD}/data_preprocessing/{theme}/genotype_data/{get_king_prefix(theme)}.unrelated.bed"
+
+
+def get_related_bed(theme):
+    return f"{CWD}/data_preprocessing/{theme}/genotype_data/{get_king_prefix(theme)}.related.bed"
+
+
+def get_unrelated_pruned_prefix(theme):
+    return f"{get_king_prefix(theme)}.unrelated.plink_qc.prune"
+
+
+def get_unrelated_pruned_bed(theme):
+    return f"{CWD}/data_preprocessing/{theme}/genotype_data/{get_unrelated_pruned_prefix(theme)}.bed"
+
+
+def get_unrelated_pruned_in(theme):
+    return f"{CWD}/data_preprocessing/{theme}/genotype_data/{get_unrelated_pruned_prefix(theme)}.in"
+
+
+def get_related_qc_prefix(theme):
+    return f"{get_king_prefix(theme)}.related.plink_qc.extracted"
+
+
+def get_related_qc_bed(theme):
+    return f"{CWD}/data_preprocessing/{theme}/genotype_data/{get_related_qc_prefix(theme)}.bed"
+
+
+def get_flashpca_prefix(theme):
+    return f"{get_unrelated_pruned_prefix(theme)}.pca"
+
+
+def get_flashpca_rds(theme):
+    return f"{CWD}/data_preprocessing/{theme}/pca/{get_flashpca_prefix(theme)}.rds"
+
+
+def get_projected_pca_prefix(theme):
+    return f"{get_related_qc_prefix(theme)}.pca.projected"
+
+
+def get_projected_pca_rds(theme):
+    return f"{CWD}/data_preprocessing/{theme}/pca/{get_projected_pca_prefix(theme)}.rds"
+
+
+def get_merged_cov_base(theme):
+    return get_theme_covariate_base(theme)
+
+
+def get_merged_cov_path(theme):
+    return f"{CWD}/data_preprocessing/{theme}/covariates/{get_merged_cov_base(theme)}.pca.gz"
+
+
+def get_phenotype_chrom_list(theme):
+    return (
+        f"{CWD}/data_preprocessing/{theme}/phenotype_data/"
+        f"{get_phenotype_base(theme)}.phenotype_by_chrom_files.txt"
+    )
+
+
+def get_phenotype_region_list(theme):
+    return (
+        f"{CWD}/data_preprocessing/{theme}/phenotype_data/"
+        f"{get_phenotype_base(theme)}.phenotype_by_chrom_files.region_list.txt"
+    )
+
+
+def get_hidden_factor_prefix(theme):
+    return f"{get_phenotype_base(theme)}.{get_merged_cov_base(theme)}.pca"
+
+
+def get_hidden_factors_by_theme(theme):
+    return (
+        f"{CWD}/data_preprocessing/{theme}/covariates/"
+        f"{get_hidden_factor_prefix(theme)}.{HF_METHOD}.gz"
     )
 
 
 def get_hidden_factors(wc):
-    """
-    Return the hidden factor covariate file path based on the configured method.
-    Output naming matches covariate_hidden_factor.ipynb conventions:
-      PEER        → {theme}.PEER.gz
-      Marchenko_PC → {theme}.Marchenko_PC.gz
-    """
-    if HF_METHOD == "PEER":
-        return (
-            f"{CWD}/data_preprocessing/{wc.theme}/covariates/"
-            f"{wc.theme}.PEER.gz"
-        )
-    return (
-        f"{CWD}/data_preprocessing/{wc.theme}/covariates/"
-        f"{wc.theme}.Marchenko_PC.gz"
-    )
+    return get_hidden_factors_by_theme(wc.theme)
 
 
 def get_input_plink(wc):
@@ -127,7 +330,7 @@ def get_input_plink(wc):
     prebuilt = config["genotype"].get("plink_bed", "")
     if prebuilt:
         return prebuilt
-    return f"{CWD}/data_preprocessing/genotype/xqtl_protocol_data.converted.bed"
+    return f"{CWD}/data_preprocessing/genotype/{CONVERTED_PLINK_BASENAME}.bed"
 
 
 # ── Include rule modules ─────────────────────────────────────────────────────
@@ -154,20 +357,14 @@ rule all:
 
         # ── 2. Genotype preprocessing ────────────────────────────────────────────
         # genotype_by_chrom_files.txt: SoS output from genotype_formatting.ipynb
-        f"{CWD}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
+        get_genotype_chrom_list(),
 
         # ── 3. Per-tissue PCA ────────────────────────────────────────────────────
-        expand(
-            "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.pca.projected.rds",
-            cwd=CWD, theme=THEMES,
-        ),
+        [get_projected_pca_rds(theme) for theme in THEMES],
 
         # ── 4. Hidden factor covariates ──────────────────────────────────────────
         # Naming: {theme}.{HF_METHOD}.gz  (e.g., AC.Marchenko_PC.gz or AC.PEER.gz)
-        expand(
-            "{cwd}/data_preprocessing/{theme}/covariates/{theme}.{hf_method}.gz",
-            cwd=CWD, theme=THEMES, hf_method=HF_METHOD,
-        ),
+        [get_hidden_factors_by_theme(theme) for theme in THEMES],
 
         # ── 5. TensorQTL CIS association ─────────────────────────────────────────
         expand(
@@ -221,23 +418,17 @@ rule phenotype_calling:
 rule genotype_preprocessing:
     """Run only the genotype preprocessing stage (VCF QC → per-chrom plink)."""
     input:
-        f"{CWD}/data_preprocessing/genotype/xqtl_protocol_data.plink_qc.genotype_by_chrom_files.txt",
+        get_genotype_chrom_list(),
 
 rule sample_qc_pca:
     """Run only sample QC and PCA for all themes."""
     input:
-        expand(
-            "{cwd}/data_preprocessing/{theme}/pca/xqtl_protocol_data.plink_qc.{theme}.pca.projected.rds",
-            cwd=CWD, theme=THEMES,
-        ),
+        [get_projected_pca_rds(theme) for theme in THEMES],
 
 rule covariate_prep:
     """Run only covariate preparation (merge PCs + hidden factors)."""
     input:
-        expand(
-            "{cwd}/data_preprocessing/{theme}/covariates/{theme}.{hf_method}.gz",
-            cwd=CWD, theme=THEMES, hf_method=HF_METHOD,
-        ),
+        [get_hidden_factors_by_theme(theme) for theme in THEMES],
 
 rule association_testing:
     """Run only TensorQTL CIS association testing."""
