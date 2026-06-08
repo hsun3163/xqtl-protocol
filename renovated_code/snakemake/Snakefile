@@ -54,12 +54,12 @@ CHROMS      = config["chromosomes"]
 NORM_METHOD = config["normalization"]["method"]
 HF_METHOD   = config["hidden_factors"]["method"]
 
-# Modular SoS: SoS wrapper notebooks that call modular scripts instead of inline code.
-# rules/sos/*.smk use these to redirect sos run calls to modular_sos/notebooks/.
+# Modular SoS: pipeline notebooks now call modular scripts instead of inline code.
+# rules/sos/*.smk use these to redirect sos run calls to the modularized pipeline notebooks.
 _SNAKEFILE_DIR   = _Path(workflow.snakefile).parent
 MODULAR_SOS_NOTEBOOKS = config.get(
     "modular_sos_notebooks_dir",
-    str(_SNAKEFILE_DIR / "modular_sos" / "notebooks"),
+    str(_SNAKEFILE_DIR.parent.parent / "pipeline"),
 )
 RENOVATED_CODE = config.get(
     "renovated_code_dir",

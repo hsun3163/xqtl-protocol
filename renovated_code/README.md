@@ -83,10 +83,10 @@ phenotype_imputation.ipynb
 The Modular SoS Snakefile executes:
 
 ```text
-Snakemake -> sos run renovated_code/snakemake/modular_sos/notebooks/<notebook>.ipynb <step>
+Snakemake -> sos run pipeline/<notebook>.ipynb <step>
 ```
 
-Those notebooks call modular scripts under `renovated_code/script/`.
+Those `pipeline/` notebooks are symlinks into `code/` and now call modular scripts under `renovated_code/script/`.
 
 ### Targets
 
